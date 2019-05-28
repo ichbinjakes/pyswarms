@@ -20,7 +20,7 @@ is defined as:
 
 .. math::
 
-   v_{ij}(t + 1) = m * v_{ij}(t) + c_{1}r_{1j}(t)[y_{ij}(t) − x_{ij}(t)]
+   v_{ij}(t + 1) = w * v_{ij}(t) + c_{1}r_{1j}(t)[y_{ij}(t) − x_{ij}(t)]
                    + c_{2}r_{2j}(t)[\hat{y}_{j}(t) − x_{ij}(t)]
 
 Here, :math:`c1` and :math:`c2` are the cognitive and social parameters
@@ -60,8 +60,9 @@ import logging
 
 # Import modules
 import numpy as np
+import multiprocessing as mp
 
-from ..backend.operators import compute_pbest
+from ..backend.operators import compute_pbest, compute_objective_function
 from ..backend.topology import Star
 from ..backend.handlers import BoundaryHandler, VelocityHandler
 from ..base import SwarmOptimizer
@@ -99,24 +100,24 @@ class GlobalBestPSO(SwarmOptimizer):
                     social parameter
                 * w : float
                     inertia parameter
-        bounds : tuple of :code:`np.ndarray` (default is :code:`None`)
-            a tuple of size 2 where the first entry is the minimum bound
-            while the second entry is the maximum bound. Each array must
-            be of shape :code:`(dimensions,)`.
-        bh_strategy : String
+        bounds : tuple of numpy.ndarray, optional
+            a tuple of size 2 where the first entry is the minimum bound while
+            the second entry is the maximum bound. Each array must be of shape
+            :code:`(dimensions,)`.
+        bh_strategy : str
             a strategy for the handling of out-of-bounds particles.
-        velocity_clamp : tuple (default is :code:`None`)
-            a tuple of size 2 where the first entry is the minimum velocity
-            and the second entry is the maximum velocity. It
-            sets the limits for velocity clamping.
-        vh_strategy : String
+        velocity_clamp : tuple, optional
+            a tuple of size 2 where the first entry is the minimum velocity and
+            the second entry is the maximum velocity. It sets the limits for
+            velocity clamping.
+        vh_strategy : str
             a strategy for the handling of the velocity of out-of-bounds particles.
         center : list (default is :code:`None`)
             an array of size :code:`dimensions`
         ftol : float
             relative error in objective_func(best_pos) acceptable for
-            convergence
-        init_pos : :code:`numpy.ndarray` (default is :code:`None`)
+            convergence. Default is :code:`-np.inf`
+        init_pos : numpy.ndarray, optional
             option to explicitly set the particles' initial positions. Set to
             :code:`None` if you wish to generate the particles randomly.
         """
@@ -141,7 +142,7 @@ class GlobalBestPSO(SwarmOptimizer):
         self.vh = VelocityHandler(strategy=vh_strategy)
         self.name = __name__
 
-    def optimize(self, objective_func, iters, **kwargs):
+    def optimize(self, objective_func, iters, n_processes=None, **kwargs):
         """Optimize the swarm for a number of iterations
 
         Performs the optimization to evaluate the objective
@@ -149,10 +150,12 @@ class GlobalBestPSO(SwarmOptimizer):
 
         Parameters
         ----------
-        objective_func : function
+        objective_func : callable
             objective function to be evaluated
         iters : int
             number of iterations
+        n_processes : int
+            number of processes to use for parallel particle evaluation (default: None = no parallelization)
         kwargs : dict
             arguments for the objective function
 
@@ -171,11 +174,14 @@ class GlobalBestPSO(SwarmOptimizer):
         self.bh.memory = self.swarm.position
         self.vh.memory = self.swarm.position
 
+        # Setup Pool of processes for parallel evaluation
+        pool = None if n_processes is None else mp.Pool(n_processes)
+
         self.swarm.pbest_cost = np.full(self.swarm_size[0], np.inf)
         for i in self.rep.pbar(iters, self.name):
             # Compute cost for current position and personal best
             # fmt: off
-            self.swarm.current_cost = objective_func(self.swarm.position, **kwargs)
+            self.swarm.current_cost = compute_objective_function(self.swarm, objective_func, pool=pool, **kwargs)
             self.swarm.pbest_pos, self.swarm.pbest_cost = compute_pbest(self.swarm)
             # Set best_cost_yet_found for ftol
             best_cost_yet_found = self.swarm.best_cost
@@ -207,7 +213,7 @@ class GlobalBestPSO(SwarmOptimizer):
             )
         # Obtain the final best_cost and the final best_position
         final_best_cost = self.swarm.best_cost.copy()
-        final_best_pos = self.swarm.best_pos.copy()
+        final_best_pos = self.swarm.pbest_pos[self.swarm.pbest_cost.argmin()].copy()
         # Write report in log and return final cost and position
         self.rep.log(
             "Optimization finished | best cost: {}, best pos: {}".format(

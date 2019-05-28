@@ -69,8 +69,9 @@ import logging
 
 # Import modules
 import numpy as np
+import multiprocessing as mp
 
-from ..backend.operators import compute_pbest
+from ..backend.operators import compute_pbest, compute_objective_function
 from ..backend.topology import Ring
 from ..backend.handlers import BoundaryHandler, VelocityHandler
 from ..base import SwarmOptimizer
@@ -100,23 +101,23 @@ class LocalBestPSO(SwarmOptimizer):
             number of particles in the swarm.
         dimensions : int
             number of dimensions in the space.
-        bounds : tuple of np.ndarray, optional (default is :code:`None`)
+        bounds : tuple of numpy.ndarray
             a tuple of size 2 where the first entry is the minimum bound
             while the second entry is the maximum bound. Each array must
             be of shape :code:`(dimensions,)`.
-        bh_strategy : String
+        bh_strategy : str
             a strategy for the handling of out-of-bounds particles.
         velocity_clamp : tuple (default is :code:`(0,1)`)
             a tuple of size 2 where the first entry is the minimum velocity
             and the second entry is the maximum velocity. It
             sets the limits for velocity clamping.
-        vh_strategy : String
+        vh_strategy : str
             a strategy for the handling of the velocity of out-of-bounds particles.
-        center : list (default is :code:`None`)
+        center : list, optional
             an array of size :code:`dimensions`
         ftol : float
             relative error in objective_func(best_pos) acceptable for
-            convergence
+            convergence. Default is :code:`-np.inf`
         options : dict with keys :code:`{'c1', 'c2', 'w', 'k', 'p'}`
             a dictionary containing the parameters for the specific
             optimization technique
@@ -133,12 +134,12 @@ class LocalBestPSO(SwarmOptimizer):
                     the Minkowski p-norm to use. 1 is the
                     sum-of-absolute values (or L1 distance) while 2 is
                     the Euclidean (or L2) distance.
-        init_pos : :code:`numpy.ndarray` (default is :code:`None`)
+        init_pos : numpy.ndarray, optional
             option to explicitly set the particles' initial positions. Set to
             :code:`None` if you wish to generate the particles randomly.
-        static: bool (Default is :code:`False`)
+        static: bool
             a boolean that decides whether the Ring topology
-            used is static or dynamic
+            used is static or dynamic. Default is `False`
         """
         # Initialize logger
         self.logger = logging.getLogger(__name__)
@@ -165,7 +166,7 @@ class LocalBestPSO(SwarmOptimizer):
         self.vh = VelocityHandler(strategy=vh_strategy)
         self.name = __name__
 
-    def optimize(self, objective_func, iters, **kwargs):
+    def optimize(self, objective_func, iters, n_processes=None, **kwargs):
         """Optimize the swarm for a number of iterations
 
         Performs the optimization to evaluate the objective
@@ -173,10 +174,12 @@ class LocalBestPSO(SwarmOptimizer):
 
         Parameters
         ----------
-        objective_func : function
+        objective_func : callable
             objective function to be evaluated
         iters : int
             number of iterations
+        n_processes : int
+            number of processes to use for parallel particle evaluation (default: None = no parallelization)
         kwargs : dict
             arguments for the objective function
 
@@ -195,11 +198,14 @@ class LocalBestPSO(SwarmOptimizer):
         self.bh.memory = self.swarm.position
         self.vh.memory = self.swarm.position
 
+        # Setup Pool of processes for parallel evaluation
+        pool = None if n_processes is None else mp.Pool(n_processes)
+
         self.swarm.pbest_cost = np.full(self.swarm_size[0], np.inf)
         for i in self.rep.pbar(iters, self.name):
             # Compute cost for current position and personal best
-            self.swarm.current_cost = objective_func(
-                self.swarm.position, **kwargs
+            self.swarm.current_cost = compute_objective_function(
+                self.swarm, objective_func, pool=pool, **kwargs
             )
             self.swarm.pbest_pos, self.swarm.pbest_cost = compute_pbest(
                 self.swarm
@@ -235,7 +241,7 @@ class LocalBestPSO(SwarmOptimizer):
             )
         # Obtain the final best_cost and the final best_position
         final_best_cost = self.swarm.best_cost.copy()
-        final_best_pos = self.swarm.position[self.swarm.pbest_cost.argmin(axis=0)].copy()
+        final_best_pos = self.swarm.pbest_pos[self.swarm.pbest_cost.argmin()].copy()
         # Write report in log and return final cost and position
         self.rep.log(
             "Optimization finished | best cost: {}, best pos: {}".format(

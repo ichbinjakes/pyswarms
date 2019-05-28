@@ -16,6 +16,7 @@ import numpy as np
 
 from ..utils.reporter import Reporter
 from .handlers import BoundaryHandler, VelocityHandler
+from functools import partial
 
 
 rep = Reporter(logger=logging.getLogger(__name__))
@@ -104,14 +105,14 @@ def compute_velocity(swarm, clamp, vh, bounds=None):
     ----------
     swarm : pyswarms.backend.swarms.Swarm
         a Swarm instance
-    clamp : tuple of floats (default is :code:`None`)
+    clamp : tuple of floats, optional
         a tuple of size 2 where the first entry is the minimum velocity
         and the second entry is the maximum velocity. It
         sets the limits for velocity clamping.
     vh : pyswarms.backend.handlers.VelocityHandler
         a VelocityHandler object with a specified handling strategy.
         For further information see :mod:`pyswarms.backend.handlers`.
-    bounds : tuple of :code:`np.ndarray` or list (default is :code:`None`)
+    bounds : tuple of numpy.ndarray or list, optional
         a tuple of size 2 where the first entry is the minimum bound while
         the second entry is the maximum bound. Each array must be of shape
         :code:`(dimensions,)`.
@@ -159,9 +160,9 @@ def compute_velocity(swarm, clamp, vh, bounds=None):
 def compute_position(swarm, bounds, bh):
     """Update the position matrix
 
-    This method updates the position matrix given the current position and
-    the velocity. If bounded, the positions are handled by a :code:`BoundaryHandler`
-    instance.
+    This method updates the position matrix given the current position and the
+    velocity. If bounded, the positions are handled by a
+    :code:`BoundaryHandler` instance
 
     .. code-block :: python
 
@@ -179,7 +180,7 @@ def compute_position(swarm, bounds, bh):
     ----------
     swarm : pyswarms.backend.swarms.Swarm
         a Swarm instance
-    bounds : tuple of :code:`np.ndarray` or list (default is :code:`None`)
+    bounds : tuple of numpy.ndarray or list, optional
         a tuple of size 2 where the first entry is the minimum bound while
         the second entry is the maximum bound. Each array must be of shape
         :code:`(dimensions,)`.
@@ -207,3 +208,38 @@ def compute_position(swarm, bounds, bh):
         raise
     else:
         return position
+
+
+def compute_objective_function(swarm, objective_func, pool=None, **kwargs):
+    """Evaluate particles using the objective function
+
+    This method evaluates each particle in the swarm according to the objective
+    function passed.
+
+    If a pool is passed, then the evaluation of the particles is done in
+    parallel using multiple processes.
+
+    Parameters
+    ----------
+    swarm : pyswarms.backend.swarms.Swarm
+        a Swarm instance
+    objective_func : function
+        objective function to be evaluated
+    pool: multiprocessing.Pool
+        multiprocessing.Pool to be used for parallel particle evaluation
+    kwargs : dict
+        arguments for the objective function
+
+    Returns
+    -------
+    numpy.ndarray
+        Cost-matrix for the given swarm
+    """
+    if pool is None:
+        return objective_func(swarm.position, **kwargs)
+    else:
+        results = pool.map(
+            partial(objective_func, **kwargs),
+            np.array_split(swarm.position, pool._processes),
+        )
+        return np.concatenate(results)

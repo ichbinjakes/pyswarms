@@ -56,8 +56,9 @@ import logging
 
 # Import modules
 import numpy as np
+import multiprocessing as mp
 
-from ..backend.operators import compute_pbest
+from ..backend.operators import compute_pbest, compute_objective_function
 from ..backend.topology import Ring
 from ..backend.handlers import BoundaryHandler, VelocityHandler
 from ..base import DiscreteSwarmOptimizer
@@ -99,10 +100,10 @@ class BinaryPSO(DiscreteSwarmOptimizer):
                     the Minkowski p-norm to use. 1 is the
                     sum-of-absolute values (or L1 distance) while 2 is
                     the Euclidean (or L2) distance.
-        init_pos : :code:`numpy.ndarray` (default is :code:`None`)
+        init_pos : numpy.ndarray, optional
             option to explicitly set the particles' initial positions. Set to
             :code:`None` if you wish to generate the particles randomly.
-        velocity_clamp : tuple (default is :code:`None`)
+        velocity_clamp : tuple, optional
             a tuple of size 2 where the first entry is the minimum velocity
             and the second entry is the maximum velocity. It
             sets the limits for velocity clamping.
@@ -134,7 +135,7 @@ class BinaryPSO(DiscreteSwarmOptimizer):
         self.vh = VelocityHandler(strategy=vh_strategy)
         self.name = __name__
 
-    def optimize(self, objective_func, iters, **kwargs):
+    def optimize(self, objective_func, iters, n_processes=None, **kwargs):
         """Optimize the swarm for a number of iterations
 
         Performs the optimization to evaluate the objective
@@ -146,6 +147,9 @@ class BinaryPSO(DiscreteSwarmOptimizer):
             objective function to be evaluated
         iters : int
             number of iterations
+        n_processes : int, optional
+            number of processes to use for parallel particle evaluation
+            Defaut is None with no parallelization.
         kwargs : dict
             arguments for objective function
 
@@ -163,11 +167,14 @@ class BinaryPSO(DiscreteSwarmOptimizer):
         # Populate memory of the handlers
         self.vh.memory = self.swarm.position
 
+        # Setup Pool of processes for parallel evaluation
+        pool = None if n_processes is None else mp.Pool(n_processes)
+
         self.swarm.pbest_cost = np.full(self.swarm_size[0], np.inf)
         for i in self.rep.pbar(iters, self.name):
             # Compute cost for current position and personal best
-            self.swarm.current_cost = objective_func(
-                self.swarm.position, **kwargs
+            self.swarm.current_cost = compute_objective_function(
+                self.swarm, objective_func, pool, **kwargs
             )
             self.swarm.pbest_pos, self.swarm.pbest_cost = compute_pbest(
                 self.swarm
@@ -202,7 +209,7 @@ class BinaryPSO(DiscreteSwarmOptimizer):
             self.swarm.position = self._compute_position(self.swarm)
         # Obtain the final best_cost and the final best_position
         final_best_cost = self.swarm.best_cost.copy()
-        final_best_pos = self.swarm.position[self.swarm.pbest_cost.argmin(axis=0)].copy()
+        final_best_pos = self.swarm.pbest_pos[self.swarm.pbest_cost.argmin()].copy()
         self.rep.log(
             "Optimization finished | best cost: {}, best pos: {}".format(
                 final_best_cost, final_best_pos

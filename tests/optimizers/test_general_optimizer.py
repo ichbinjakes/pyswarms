@@ -70,6 +70,12 @@ class TestGeneralOptimizer(ABCTestOptimizer):
         optimizer.optimize(sphere, 2000)
         assert np.array(optimizer.cost_history).shape != (2000,)
 
+    def test_parallel_evaluation(self, obj_without_args, optimizer):
+        """Test if parallelization breaks the optimization process"""
+        import multiprocessing
+        optimizer.optimize(obj_without_args, 2000, n_processes=multiprocessing.cpu_count())
+        assert np.array(optimizer.cost_history).shape == (2000,)
+
     @pytest.mark.skip(reason="Some topologies converge too slowly")
     def test_obj_with_kwargs(self, obj_with_args, optimizer):
         """Test if kwargs are passed properly in objfunc"""
@@ -95,3 +101,11 @@ class TestGeneralOptimizer(ABCTestOptimizer):
         with pytest.raises(TypeError):
             # Wrong kwargs
             cost, pos = optimizer.optimize(obj_with_args, 1000, c=1, d=100)
+
+    def test_general_correct_pos(self, options, optimizer):
+        """ Test to check general optimiser returns the correct position corresponding to the best cost """
+        cost, pos = optimizer.optimize(sphere, iters=5)
+        # find best pos from history
+        min_cost_idx = np.argmin(optimizer.cost_history)
+        min_pos_idx = np.argmin(sphere(optimizer.pos_history[min_cost_idx]))
+        assert np.array_equal(optimizer.pos_history[min_cost_idx][min_pos_idx], pos)
